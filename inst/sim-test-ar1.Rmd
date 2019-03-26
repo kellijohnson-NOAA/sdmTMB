@@ -19,14 +19,50 @@ Required prior to running functions as well as in step-by-step approach
 
 #### Create fine-scale square 50 x 50 grid to predict on
 ```{r}
-grid <- expand.grid(X = seq(1:50), Y = seq(1:50))
+grid <- expand.grid(x = seq(1:25), y = seq(1:25))
 ```
+
+#### Creat barrier polygons to test influece of a barrier mesh
+```{r}
+x <- c(0, 0, 5, 5)
+y <- c(15, 20, 20, 15)
+Hole1 <- as.data.frame(cbind(x,y))
+
+x <- c(15, 15, 20, 20)
+y <- c(10, 15, 15, 10)
+Hole2 <- as.data.frame(cbind(x,y))
+
+Hole1Poly <- sp::Polygon(Hole1, hole = TRUE)
+Hole1SP   <- sp::SpatialPolygons(list(sp::Polygons(list(Hole1Poly), ID = '1')))
+
+Hole2Poly <- sp::Polygon(Hole2, hole = TRUE)
+Hole2SP   <- sp::SpatialPolygons(list(sp::Polygons(list(Hole2Poly), ID = '2')))
+
+barrier_polygons <- raster::union(Hole1SP,Hole2SP)
+#grid_polygon <- sp::SpatialPolygons(list(sp::Polygons(list(sp::Polygon(grid, hole = TRUE)), ID='0')))
+
+#clipped <- raster::crop(grid_polygon, barrier_polygons)
+
+hole1_points <- expand.grid(x = min(Hole1$x):max(Hole1$x), y = min(Hole1$y):max(Hole1$y))
+
+hole2_points <- expand.grid(x = min(Hole2$x):max(Hole2$x), y = min(Hole2$y):max(Hole2$y))
+
+holes <- rbind(hole1_points, hole2_points)
+
+grid <- anti_join(grid, holes, by = c("x","y"))
+
+```
+
+
 ### --OR-- 
 #### Use existing spatial grid
 e.g. Queen Charlotte Sound
 ```{r, eval=FALSE}
 grid <- qcs_grid
 ```
+
+
+
 
 ## 1. Simulate 'true' data
 
@@ -63,7 +99,7 @@ sim_args_vec <- function(x = stats::runif(400, 0, 10), y = stats::runif(400, 0, 
 ```
 
 ```{r}
-simdat <- sim_args_vec( x = grid$X, y = grid$Y,
+simdat <- sim_args_vec( x = grid$x, y = grid$y,
                         time_steps = 9,
                         plot = FALSE,
                         ar1_fields = TRUE,
@@ -89,7 +125,7 @@ g
 #### Select a random sample, evenly distributed across time periods
 Total grid cells are `r nrow(simdat[[1]])` / `r length(unique(simdat[[1]]$time))` time periods = `r nrow(simdat[[1]])/length(unique(simdat[[1]]$time))`
 ```{r }
-dat <- simdat[[1]] %>% group_by(time) %>% sample_n(500) %>% ungroup()
+dat <- simdat[[1]] %>% group_by(time) %>% sample_n(200) %>% ungroup()
 ```
 
 ```{r, echo = FALSE}
@@ -122,6 +158,12 @@ g
 ### Design mesh 
 ```{r}
 spde <- make_spde(x = dat$x, y = dat$y, n_knots = 150)
+plot_spde(spde)
+```
+OR/
+With barriers
+```{r}
+spde <- make_spde(x = dat$x, y = dat$y, n_knots = 150, barrier = barrier_polygons)
 plot_spde(spde)
 ```
 
