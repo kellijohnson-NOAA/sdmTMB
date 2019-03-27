@@ -28,7 +28,7 @@
 #' plot_spde(sp2)
 #' }
 
-make_spde <- function(x, y, n_knots, seed = 42, mesh = NULL, barrier = NULL) {
+make_spde <- function(x, y, n_knots, seed = 42, mesh = NULL, boundary = NULL) {
   loc_xy <- cbind(x, y)
 
   if (is.null(mesh)) {
@@ -55,42 +55,49 @@ make_spde <- function(x, y, n_knots, seed = 42, mesh = NULL, barrier = NULL) {
     loc_centers <- NA
   }
 
-  if (is.null(barrier)){
+  if (is.null(boundary)){
     mesh <- INLA::inla.mesh.create(loc_centers, refine = TRUE)
     spde <- INLA::inla.spde2.matern(mesh)
 
   } else {
 
-    barrier_polygons <- barrier
+    #barrier_polygons <- barrier
     #loc_xy <- inla.nonconvex.hull(cbind(x,y))
-    ConvHull <- INLA::inla.nonconvex.hull(loc_xy)
+    #ConvHull <- INLA::inla.nonconvex.hull(loc_xy)
 
-    mesh.barrier <- INLA::inla.mesh.create(loc = loc_centers,
-      boundary = ConvHull,
-      interior = barrier_polygons, # formal class 'SpatialPloygons' from package sp
-      refine = TRUE)
+    mesh.bound <- INLA::inla.mesh.create(loc = loc_centers,
+      boundary = boundary,
+      #max.edge = 0.2,
+      #cutoff = 0.1,
+      #cutoff = 0.04 #,
+      #interior = barrier_polygons, # formal class 'SpatialPloygons' from package sp
+      refine = TRUE
+      )
 
     # We have mesh.barrier$n number of vertices....
     # how many triangles do we have?
-    tl <- length(mesh.barrier$graph$tv[,1])
+    # tl <- length(mesh.barrier$graph$tv[,1])
+    #
+    # # Position of the centre of each triangle
+    # posTri <- matrix(0, tl, 2)
+    # for (t in 1:tl){
+    #   temp       <- mesh.barrier$loc[mesh.barrier$graph$tv[t, ], ]
+    #   posTri[t,] <- colMeans(temp)[c(1,2)]
+    # }
+    # # And give it the same coordinate reference system
+    # posTri <- sp::SpatialPoints(posTri) #,
+    #  # CRS("+proj=utm +zone=9 +south ellps=WGS84 +datum=WGS84"))
+    #
+    # # Which triangles are inside the barrier areas?
+    # barrier.triangles <- sp::over(barrier_polygons, posTri, returnList = TRUE)
+    # barrier.triangles <- unlist(barrier.triangles)
+    #
+    #spde <- INLA::inla.barrier.pcmatern(mesh.barrier,
+    #barrier.triangles = barrier.triangles)
 
-    # Position of the centre of each triangle
-    posTri <- matrix(0, tl, 2)
-    for (t in 1:tl){
-      temp       <- mesh.barrier$loc[mesh.barrier$graph$tv[t, ], ]
-      posTri[t,] <- colMeans(temp)[c(1,2)]
-    }
-    # And give it the same coordinate reference system
-    posTri <- sp::SpatialPoints(posTri) #,
-     # CRS("+proj=utm +zone=9 +south ellps=WGS84 +datum=WGS84"))
+    spde <- INLA::inla.spde2.matern(mesh.bound)
 
-    # Which triangles are inside the barrier areas?
-    barrier.triangles <- sp::over(barrier_polygons, posTri, returnList = TRUE)
-    barrier.triangles <- unlist(barrier.triangles)
-
-    spde <- INLA::inla.barrier.pcmatern(mesh.barrier,
-      barrier.triangles = barrier.triangles)
-    mesh <- mesh.barrier
+    mesh <- mesh.bound
   }
   list(
     x = x, y = y, mesh = mesh, spde = spde, cluster = knots$cluster,

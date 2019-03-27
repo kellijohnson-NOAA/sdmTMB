@@ -19,12 +19,20 @@ Required prior to running functions as well as in step-by-step approach
 
 #### Create fine-scale square 50 x 50 grid to predict on
 ```{r}
-grid <- expand.grid(x = seq(1:25), y = seq(1:25))
+grid <- expand.grid(x = seq(1:50), y = seq(1:50))
 ```
 
 #### Creat barrier polygons to test influece of a barrier mesh
 ```{r}
-x <- c(0, 0, 5, 5)
+loc_xy <- cbind(grid$x, grid$y)
+
+ConvHull <- INLA::inla.nonconvex.hull(loc_xy)
+outer <- cbind(ConvHull$loc[,1], ConvHull$loc[,2])
+
+FullPoly<- sp::Polygon(as.data.frame(outer), hole = FALSE)
+
+
+x <- c(0, 0, 15, 15)
 y <- c(15, 20, 20, 15)
 Hole1 <- as.data.frame(cbind(x,y))
 
@@ -37,6 +45,9 @@ Hole1SP   <- sp::SpatialPolygons(list(sp::Polygons(list(Hole1Poly), ID = '1')))
 
 Hole2Poly <- sp::Polygon(Hole2, hole = TRUE)
 Hole2SP   <- sp::SpatialPolygons(list(sp::Polygons(list(Hole2Poly), ID = '2')))
+
+AllPoly <- sp::SpatialPolygons(list(sp::Polygons(list(FullPoly, Hole1Poly, Hole2Poly), ID = '1')))
+bound <- INLA::inla.sp2segment(AllPoly)
 
 barrier_polygons <- raster::union(Hole1SP,Hole2SP)
 #grid_polygon <- sp::SpatialPolygons(list(sp::Polygons(list(sp::Polygon(grid, hole = TRUE)), ID='0')))
@@ -112,7 +123,7 @@ simdat <- sim_args_vec( x = grid$x, y = grid$y,
 ```
 
 ```{r, echo=FALSE}
-g <- ggplot(simdat[[1]], aes_string("x", "y", fill = "z")) +
+g <- ggplot(simdat[[1]], aes_string("x", "y", fill = "observed")) +
               geom_raster() +
               facet_wrap(~time) +
               scale_fill_viridis_c() +
@@ -129,7 +140,7 @@ dat <- simdat[[1]] %>% group_by(time) %>% sample_n(200) %>% ungroup()
 ```
 
 ```{r, echo = FALSE}
-g <- ggplot(dat, aes_string("x", "y", fill = "z")) +
+g <- ggplot(dat, aes_string("x", "y", fill = "observed")) +
               geom_raster() +
               facet_wrap(~time) +
               scale_fill_viridis_c() +
@@ -145,7 +156,7 @@ dat <- simdat[[1]] %>% filter((x <15|x>20) & (y<15|y>20))
 ```
 
 ```{r, echo = FALSE}
-g <- ggplot(dat, aes_string("x", "y", fill = "z")) +
+g <- ggplot(dat, aes_string("x", "y", fill = "observed")) +
               geom_raster() +
               facet_wrap(~time) +
               scale_fill_viridis_c() +
@@ -157,27 +168,31 @@ g
 
 ### Design mesh 
 ```{r}
-spde <- make_spde(x = dat$x, y = dat$y, n_knots = 150)
+spde <- make_spde(x = dat$x, y = dat$y, n_knots = 40)
 plot_spde(spde)
+glimpse(spde)
+
+#spde$spde$param.inla["M0"]
 ```
 OR/
 With barriers
 ```{r}
-spde <- make_spde(x = dat$x, y = dat$y, n_knots = 150, barrier = barrier_polygons)
-plot_spde(spde)
+spde2 <- make_spde(x = dat$x, y = dat$y, n_knots = 40, boundary = bound)
+plot_spde(spde2)
+glimpse(spde2)
 ```
 
 Use sdmTMB to estimate the input parameters in our simulation.\
 This model includes a spatiotemporal random field, but no fixed spatial random field.
 ```{r}
-m <- sdmTMB(formula = z ~ 1, 
+m <- sdmTMB(formula = observed ~ 1, 
             ar1_fields = TRUE,
             include_spatial = TRUE, 
             silent = TRUE,
             data = dat, 
             time = "time",
             family = gaussian(link = "identity"), 
-            spde = spde
+            spde = spde2
            )
 r <- m$tmb_obj$report()
 ```
@@ -213,13 +228,13 @@ nd[[m$time]] <- rep(original_time, each = nrow(grid))
 
 Run TMB with prediction turned on, and replace sample 'dat' with new grid 'nd'
 ```{r}
-predictions <- predict(m, newdata = nd, xy_cols = c("X", "Y"))$data
+predictions <- predict(m, newdata = nd, xy_cols = c("x", "y"))$data
 glimpse(predictions)
 ```
 
 ## 6. Contrast true and predicted values for each point in space and time
 ```{r}
-spatial_bias_dat <- full_join(simdat[[1]], predictions, by = c("x" = "X", "y" = "Y", "time" = "time"), suffix = c("", "_est")) %>% mutate(diff = est - real_z)
+spatial_bias_dat <- full_join(simdat[[1]], predictions, by = c("x" = "x", "y" = "y", "time" = "time"), suffix = c("", "_est")) %>% mutate(diff = est - real)
 glimpse(spatial_bias_dat)
 ```
 
@@ -231,13 +246,13 @@ hist(spatial_bias_dat$diff, breaks = 40)
 ### Plot spatial distribution of model estimates beside simulated true values, and the difference between them
 **dataframe** Dataframe containing all simulated and predicted values to be plotted spatially\
 **id** List of columns in dataframe that together identify unique observations (Default = c("x", "y", "time"))\
-**values** List of values to be shown in plotted on separate panels (Default = c("real_z", "est", "diff"))\
+**values** List of values to be shown in plotted on separate panels (Default = c("real", "est", "diff"))\
 **time_periods** List of time periods to be shown in plot (Default = c("1", "5", "9"))\
 
 ```{r}
 plot_map_diff <- function(dataframe,
                           id = c("x", "y", "time"),
-                          values = c("real_z", "est", "diff"),
+                          values = c("real", "est", "diff"),
                           time_periods = c("1", "5", "9")) {
 
   melted <- reshape2::melt(dataframe, id) %>% # could be replace with tidyr::gather(spatial_bias_dat, "variable", "value",... )?
@@ -335,7 +350,7 @@ sim_predictions <- function(iter = sample.int(1e3, 1), plot = FALSE,
                             kappa = 0.05,
                             phi = 0.1,
                             N = 1000, n_knots = 150, # iter.max=1e4, eval.max=1e4,
-                            formula = z ~ 1, family = gaussian(link = "identity")) {
+                            formula = observed ~ 1, family = gaussian(link = "identity")) {
   set.seed(iter * 581267)
 
   simdat <- sim(
@@ -387,7 +402,7 @@ sim_predictions <- function(iter = sample.int(1e3, 1), plot = FALSE,
   head(predictions)
 
   # combine true and predicted values for each point in space and time
-  spatial_bias <- full_join(simdat, predictions, by = c("x" = "X", "y" = "Y", "time" = "time"), suffix = c("", "_est")) %>% mutate(diff = est - real_z)
+  spatial_bias <- full_join(simdat, predictions, by = c("x" = "X", "y" = "Y", "time" = "time"), suffix = c("", "_est")) %>% mutate(diff = est - real)
   spatial_bias$converg <- converg
 
   unsampled <- anti_join(spatial_bias, dat)
@@ -402,8 +417,8 @@ sim_predictions <- function(iter = sample.int(1e3, 1), plot = FALSE,
 ## 3. Use purrr:::pmap to loop the arguments through sim_preditions
 ```{r}
 all_iter <- purrr::pmap(args, sim_predictions,
-  grid = grid, x = grid$X, y = grid$Y,
-  formula = z ~ 1, family = gaussian(link = "identity")
+  grid = grid, x = grid$X, y = grid$Y, knots = 40,
+  formula = observed ~ 1, family = gaussian(link = "identity")
 )
 ```
 
