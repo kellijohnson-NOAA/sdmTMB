@@ -36,6 +36,7 @@ Imports:
     fishMod,
     future.apply,
     generics,
+    ggplot2,
     graphics,
     INLA,
     Matrix,
@@ -46,7 +47,6 @@ Imports:
     TMB (>= 1.7.13)
 Suggests:
     dplyr,
-    ggplot2,
     knitr,
     rgdal,
     rmarkdown,
